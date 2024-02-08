@@ -1,25 +1,13 @@
 import numpy as np
 import matplotlib.pyplot as plt
 import pyaudio
-from scipy.signal import lfilter, butter
+from scipy.signal import lfilter, butter, bessel, sosfilt
 import serial
 import time
 
-ser = serial.Serial('COM5', 9600, timeout=1)  # timeout=1s für das Lesen der Daten
-
-# Initialisierung der dynamischen Grenzwerte für die Skalierung
-dynamic_min_power = np.inf  # Startwert für das Minimum
-dynamic_max_power = -np.inf  # Startwert für das Maximum
-window_size = 50  # Größe des gleitenden Fensters für die dynamische Anpassung
-recent_powers = np.zeros(window_size)  # Gleitendes Fenster für die Band-Power-Werte
-
-# PyAudio-Einstellungen
-SAMPLE_RATE = 44100
-CHUNK_SIZE = 2056
-FORMAT = pyaudio.paInt16
-CHANNELS = 1
-
-# Frequenzbereiche
+#############################################################################
+#                               CONSTANTS                                   #
+#############################################################################
 FREQUENCIES = [
     (16, 60),  # SUB_BASS
     (60, 250),  # BASS
@@ -30,35 +18,86 @@ FREQUENCIES = [
     (6000, 20000)  # BRILLIANCE
 ]
 
-DMX_FIXTURES = [(1, 255), (7, 255), (13, 255), (19, 255)]  # (StartChannel, BrightnessCap)
-FIXTURE_PROFILES = [
-    (0xFF0000, 0x00000FF),  # Rotes Licht für niedrige Frequenzen
-    (0x0000FF, 0x0039000),  # Blaues Licht für etwas höhere Frequenzen
-    (0xFF0000, 0x00000FF),  # Rotes Licht wieder für noch höhere Frequenzen
-    (0x00FF00, 0xFF00000)  # Grünes Licht für die höchsten Frequenzen
+BRIGHTNESS_CAP = 217  # 85% max brightness to increase LED lifetime
+PROFILE_CYCLE_PERIOD_MS = 5000  # amount of milliseconds until the profile assignments between lamps is rotated.
+FRAME_PERIOD_MS = 66  # target value for the duration of a single frame. If the frame takes less then this, the processor will wait before moving on to the next frame.
+AUDIO_BANDS = len(FREQUENCIES)  # amount of audio bands
+AUDIO_BAND_MAX = 1023  # maximum value to expect from the analoge audio signal 1023 = 10-bit ADC
+DMX_CHANNEL_MAX = 255  # maximum value allowed on a DMX channel. The DMX spec defines this as 255.
+TARGET_CLIPPING = 196.0  # target value for fixture cross-frequency duty cycle (time-clipped/time-not-clipped in parts of 1023, e.g. 196=19.2%)
+AMP_FACTOR_MAX = 64.0  # maximum allowed amplifaction factor
+AMP_FACTOR_MIN = 0.0078125  # minimal allowed amplification factor (1/128)
+
+# PyAudio-Einstellungen
+SAMPLE_RATE = 44100
+CHUNK_SIZE = 2056
+FORMAT = pyaudio.paInt16
+CHANNELS = 1
+
+#############################################################################
+#                               CONFIGURATION                               #
+#############################################################################
+
+# Initialisierung der dynamischen Grenzwerte für die Skalierung
+dynamic_min_power = np.inf  # Startwert für das Minimum
+dynamic_max_power = -np.inf  # Startwert für das Maximum
+window_size = 50  # Größe des gleitenden Fensters für die dynamische Anpassung
+recent_powers = np.zeros(window_size)  # Gleitendes Fenster für die Band-Power-Werte
+
+DMX_FIXTURES = [(1, 255), (7, 255), (13, 255), (
+    19, 255)]  # configured fixtures and their start channels. The maximum amount of supported fixtures is 16.
+RGB_COLOR_SET = [
+    # profiles that fixtures can assume. Each profile consists of a hex code for color and a hex code for frequencies the fixture should respond to.
+    (0x0000FF, 0x00000FF),
+    (0xFF0000, 0x0039000),
+    (0xFF0000, 0x00000FF),
+    (0x00FF00, 0xFF00000)
 ]
+
+whiteLightSetting = 0
+gainModeSetting = 0
+strobeFrequencySetting = 100
+strobeEnabled = False
+colorSetSetting = 0
+msPerFrameMonitor = 0
+
+
+def toggleStrobe(alternateAction):
+    global strobeEnabled
+    if alternateAction:
+        strobeEnabled = not strobeEnabled
+
+
+#############################################################################
+#                               SUBSYSTEMS                                  #
+#############################################################################
+
+ser = serial.Serial('COM5', 9600, timeout=1)  # start serial port to arduino
 
 # PyAudio-Instanz
 p = pyaudio.PyAudio()
 stream = p.open(format=FORMAT, channels=CHANNELS, rate=SAMPLE_RATE, input=True, frames_per_buffer=CHUNK_SIZE)
 
+amplificationFactor = 12.0  # amplification for signals considered non-noise (ones that should result in a non-zero light response), managed automatically
+noiseLevel = 0  # lower bound for noise, determined automatically at startup
 
-# FFT-Funktion
-def butter_highpass(cutoff, fs, order=5):
+
+def butter_bandpass(lowcut, highcut, fs, order=5):
     nyq = 0.5 * fs
-    normal_cutoff = cutoff / nyq
-    b, a = butter(order, normal_cutoff, btype='high', analog=False)
-    return b, a
+    low = lowcut / nyq
+    high = highcut / nyq
+    print(low, high)
+    sos = butter(order, [low, high], analog=False, btype='band', output='sos')
+    return sos
 
 
-def highpass_filter(data, cutoff, fs, order=5):
-    b, a = butter_highpass(cutoff, fs, order=order)
-    y = lfilter(b, a, data)
+def butter_bandpass_filter(data, fs, order=5):
+    y = []
+
+    for band in FREQUENCIES:
+        sos = butter_bandpass(band[0], band[1], fs, order=order)
+        y.append(sosfilt(sos, data))
     return y
-
-
-# Filterparameter
-cutoff = FREQUENCIES[0][0]  # Alles unterhalb dieses Wertes abschneiden
 
 
 # FFT-Funktion mit Fensterfunktion
@@ -163,19 +202,21 @@ try:
         right_channel = stereo_data[1::2]
 
         # Hochpassfilter auf beide Kanäle anwenden
-        left_data_filtered = highpass_filter(left_channel, cutoff, SAMPLE_RATE)
-        right_data_filtered = highpass_filter(right_channel, cutoff, SAMPLE_RATE)
+        left_data_filtered = butter_bandpass_filter(left_channel, SAMPLE_RATE)
+        right_data_filtered = butter_bandpass_filter(right_channel, SAMPLE_RATE)
+
+        #print(left_data_filtered)
 
         # FFT für beide Kanäle durchführen
-        l_freqs, l_spectrum = fft(left_data_filtered)
-        r_freqs, r_spectrum = fft(right_data_filtered)
+        # l_freqs, l_spectrum = fft(left_data_filtered)
+        # r_freqs, r_spectrum = fft(right_data_filtered)
 
         # Energie im Band berechnen
-        l_band_powers = get_band_energy(l_freqs, l_spectrum)
-        r_band_powers = get_band_energy(r_freqs, r_spectrum)
+        #l_band_powers = get_band_energy(l_freqs, l_spectrum)
+        #r_band_powers = get_band_energy(r_freqs, r_spectrum)
 
-        print(l_band_powers)
-        dmx_values = scale_to_dmx(l_band_powers)
+        #print(l_band_powers)
+        dmx_values = scale_to_dmx(left_data_filtered)
         dmx_values = np.clip((dmx_values * 1.5), a_min=None, a_max=255)
         # command_dmx_values = convert_to_dmx_values(dmx_values)
         # for channel, value in command_dmx_values.items():
