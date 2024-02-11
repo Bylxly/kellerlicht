@@ -1,6 +1,7 @@
 import numpy as np
 import pyaudio
 import matplotlib.pyplot as plt
+from scipy.signal import butter, lfilter
 
 # PyAudio-Einstellungen
 SAMPLE_RATE = 44100
@@ -19,6 +20,18 @@ fig, ax = plt.subplots(1, 1)
 bands = [(63, 160), (160, 400), (400, 1000), (1000, 2500), (2500, 6250), (6250, 16000), (16000, 20000)]
 band_names = ['63Hz', '160Hz', '400Hz', '1kHz', '2.5kHz', '6.25kHz', '16kHz']
 
+
+def butter_highpass(cutoff, fs, order=5):
+    nyq = 0.5 * fs
+    normal_cutoff = cutoff / nyq
+    b, a = butter(order, normal_cutoff, btype='high', analog=False)
+    return b, a
+
+
+def highpass_filter(data, cutoff, fs, order=5):
+    b, a = butter_highpass(cutoff, fs, order=order)
+    y = lfilter(b, a, data)
+    return y
 
 
 def fft(audio_data):
@@ -39,13 +52,19 @@ try:
         stereo_data = np.frombuffer(data, dtype=np.int16)
 
         # Aufteilen der Kanäle
-        #left_channel = stereo_data[0::2]
-        #right_channel = stereo_data[1::2]
+        # left_channel = stereo_data[0::2]
+        # right_channel = stereo_data[1::2]
 
-        normalized_tone = stereo_data / np.max(np.abs(stereo_data))
+        normalized_tone = stereo_data / (np.max(np.abs(stereo_data)) + 1e-5)
+
+        # Definieren Sie die Cutoff-Frequenz für den Hochpassfilter (63 Hz)
+        cutoff_frequency = 63
+
+        # Filtern Sie das normalisierte Signal
+        filtered_signal = highpass_filter(normalized_tone, cutoff_frequency, SAMPLE_RATE)
 
         # Hochpassfilter auf beide Kanäle anwenden
-        freqs, amps = fft(normalized_tone)
+        freqs, amps = fft(filtered_signal)
 
         # Initialisiere eine Liste für die Bandamplituden
         band_amplitudes = []
@@ -60,16 +79,9 @@ try:
         ax.clear()
         ax.bar(band_names, band_amplitudes, color="skyblue")
         ax.set(xlabel="Frequency Band", ylabel="Amplitude")
-        ax.set_ylim(0, max(band_amplitudes) * 1.1 + 1e-10)
+        ax.set_ylim(0, 100)
 
         plt.pause(0.01)
-
-        '''ax.clear()
-        ax.plot(freqs, amps)
-        ax.set(xlabel="Frequencies", ylabel="Amplitute")
-        ax.set_xlim([0, 25000])
-        ax.set_ylim([0, 255])
-        plt.pause(0.01)'''
 
 except KeyboardInterrupt:
     print("Analyse beendet")
