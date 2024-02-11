@@ -26,14 +26,13 @@ def send_dmx_command(channel, value):
 print("Drücken Sie Enter, um einen DMX-Befehl zu senden. Zum Beenden 'exit' eingeben.")
 
 try:
+    for i in range(1, 50):
+        if i in (1, 7, 13, 19, 25):
+            send_dmx_command(i, 255)
+        else:
+            send_dmx_command(i, 0)
+
     while True:
-
-
-        for i in range(1, 50):
-            if i in (1, 7, 13, 19, 25):
-                send_dmx_command(i, 255)
-            else:
-                send_dmx_command(i, 0)
 
         # Warten auf Benutzereingabe
         user_input = input("Warten auf Eingabe (Format 'Kanal:Wert'): ")
