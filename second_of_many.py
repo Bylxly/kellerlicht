@@ -43,7 +43,7 @@ RGB_COLOR_SET = [
 #                               SUBSYSTEMS                                  #
 #############################################################################
 
-ser = serial.Serial('COM5', 9600, timeout=1)  # start serial port to arduino
+#ser = serial.Serial('COM5', 9600, timeout=1)  # start serial port to arduino
 
 # PyAudio-Instanz
 p = pyaudio.PyAudio()
@@ -57,7 +57,6 @@ def butter_bandpass(lowcut, highcut, fs, order=5):
     nyq = 0.5 * fs
     low = lowcut / nyq
     high = highcut / nyq
-    print(low, high)
     sos = bessel(order, [low, high], analog=False, btype='band', output='sos')
     return sos
 
@@ -131,6 +130,8 @@ try:
         left_data_filtered = butter_bandpass_filter(left_channel, SAMPLE_RATE)
         right_data_filtered = butter_bandpass_filter(right_channel, SAMPLE_RATE)
 
+        print(np.shape(left_data_filtered))
+
         for i, (low, high) in enumerate(FREQUENCIES):
             axs[i].clear()
             axs[i].plot(left_data_filtered[i])
@@ -147,3 +148,4 @@ except KeyboardInterrupt:
 stream.stop_stream()
 stream.close()
 p.terminate()
+plt.close()
