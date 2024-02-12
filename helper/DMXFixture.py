@@ -1,6 +1,6 @@
 import serial
 
-ser = serial.Serial('/dev/tty.usbserial-A50285BI', 57600)  # Ersetzen Sie '/dev/ttyACM0' durch den richtigen Port
+ser = serial.Serial('/dev/tty.usbserial-A50285BI', 57600)  # Ersetzen Sie '/dev/...' durch den richtigen Port
 
 class DMXFixture:
     localDimmerChannel = 0
@@ -27,7 +27,6 @@ class DMXFixture:
         self._redValue = redValue
         self._greenValue = greenValue
         self._blueValue = blueValue
-        print(self._redValue, self._greenValue, self._blueValue)
 
     def setWhite(self, whiteValue):
         self._whiteValue = whiteValue

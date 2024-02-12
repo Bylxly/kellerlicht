@@ -286,12 +286,13 @@ try:
         # Filtern Sie das normalisierte Signal
         filtered_signal = highpass_filter(normalized_tone, cutoff_frequency, SAMPLE_RATE)
 
-        # Fenster auf beide Kanäle anwenden
+        # Fenster auf Kanal anwenden
         freqs, amps = fft(filtered_signal)
 
         # Initialisiere eine Liste für die Bandamplituden
         band_amplitudes = []
 
+        # Alternative zu FFT, muss geschaut werden ob besser
         '''for low, high in bands:
             filtered_signal = bandpass_filter(normalized_tone, low, high, SAMPLE_RATE)
             temp = (np.max(np.abs(filtered_signal)))
@@ -299,6 +300,7 @@ try:
                 AUDIO_BAND_MAX = temp
             band_amplitudes.append(temp)'''
 
+        # Teile FFT in Frequenzbänder auf
         for low, high in bands:
             # Finde die Indizes der Frequenzen im gewünschten Band
             idx = np.where((freqs >= low) & (freqs <= high))
@@ -316,6 +318,7 @@ try:
         permutation_code = generate_permutation_code()
         permuted_profiles = permutate_profiles(permutation_code, permutatedProfiles)'''
 
+        # Sende DMX Befehl an Lampe
         for fixtureID in range(0, FIXTURE_AMOUNT):
             setFixtureColor(fixtures[fixtureID], band_amplitudes, rgb_color_set[fixtureID].getHexColor())
             setFixtureBrightness(fixtures[fixtureID], band_amplitudes, rgb_color_set[fixtureID].getHexFrequency())
@@ -323,7 +326,10 @@ try:
 
             fixtures[fixtureID].display()
 
+        # Kurze Pause
         time.sleep(0.05)
+
+        # Zeichne Graph
         ax.clear()
         ax.bar(band_names, band_amplitudes, color="skyblue")
         ax.set(xlabel="Frequency Band", ylabel="Amplitude")
