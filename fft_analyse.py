@@ -8,7 +8,7 @@ import time
 
 # PyAudio-Einstellungen
 SAMPLE_RATE = 44100
-CHUNK_SIZE = 2056
+CHUNK_SIZE = 4096
 FORMAT = pyaudio.paInt16
 CHANNELS = 1
 
@@ -29,7 +29,7 @@ start_time = time.time()
 bands = [(63, 160), (160, 400), (400, 1000), (1000, 2500), (2500, 6250), (6250, 16000), (16000, 20000)]
 band_names = ['63Hz', '160Hz', '400Hz', '1kHz', '2.5kHz', '6.25kHz', '16kHz']
 
-AUDIO_BAND_MAX = 1023
+AUDIO_BAND_MAX = 10000
 
 AMP_FACTOR_MAX = 64.0  # maximum allowed amplifaction factor
 AMP_FACTOR_MIN = 0.0078125  # minimal allowed amplification factor (1/128)
@@ -118,8 +118,21 @@ def highpass_filter(data, cutoff, fs, order=5):
     return y
 
 
+def butter_bandpass(lowcut, highcut, fs, order=5):
+    nyq = 0.5 * fs
+    low = lowcut / nyq
+    high = highcut / nyq
+    b, a = butter(order, [low, high], btype='band')
+    return b, a
+
+
+def bandpass_filter(data, lowcut, highcut, fs, order=5):
+    b, a = butter_bandpass(lowcut, highcut, fs, order=order)
+    y = lfilter(b, a, data)
+    return y
+
+
 def fft(audio_data):
-    # not like MSGEQ7, window is being applied to whole data
     window = np.hamming(len(audio_data))
     audio_data = audio_data * window
     freqs = np.fft.rfftfreq(len(audio_data), 1 / SAMPLE_RATE)
@@ -143,7 +156,7 @@ def mapAudioAmplitudeToLightLevel(band_amplitudes, band_average):
         halfSignalWidth = band_amplitudes[band] - band_average
         signalAmplified = max(halfSignalWidth, 0) * amplificationFactor
 
-        if (signalAmplified >= AUDIO_BAND_MAX):
+        if signalAmplified >= AUDIO_BAND_MAX:
             bandClippings[band] = AUDIO_BAND_MAX
 
         bandClippings[band] = scale_value(signalAmplified, AUDIO_BAND_MAX, DMX_CHANNEL_MAX)
@@ -223,6 +236,7 @@ def millis():
 
 def setFixtureColor(targetFixture, audioAmplitudes, colorResponse):
     targetFixture.setRGB(colorResponse >> 16, (colorResponse & 0x00FF00) >> 8, colorResponse & 0x0000FF)
+    print("Fixture", targetFixture)
 
 
 def setFixtureBrightness(targetFixture, audioAmplitudes, audioResponse):
@@ -231,7 +245,7 @@ def setFixtureBrightness(targetFixture, audioAmplitudes, audioResponse):
 
     for band in range(0, len(bands)):
         bandResponse = ((audioResponse & (0xF << (band * 4))) >> (
-                    band * 4))  # get response coefficient (is between 0.0 .. 15.0)
+                band * 4))  # get response coefficient (is between 0.0 .. 15.0)
         if bandResponse > 0:
             brightness += (bandResponse / 15.0) * audioAmplitudes[band]
             observedBands += 1
@@ -272,11 +286,18 @@ try:
         # Filtern Sie das normalisierte Signal
         filtered_signal = highpass_filter(normalized_tone, cutoff_frequency, SAMPLE_RATE)
 
-        # Hochpassfilter auf beide Kanäle anwenden
+        # Fenster auf beide Kanäle anwenden
         freqs, amps = fft(filtered_signal)
 
         # Initialisiere eine Liste für die Bandamplituden
         band_amplitudes = []
+
+        '''for low, high in bands:
+            filtered_signal = bandpass_filter(normalized_tone, low, high, SAMPLE_RATE)
+            temp = (np.max(np.abs(filtered_signal)))
+            if temp > AUDIO_BAND_MAX:
+                AUDIO_BAND_MAX = temp
+            band_amplitudes.append(temp)'''
 
         for low, high in bands:
             # Finde die Indizes der Frequenzen im gewünschten Band
@@ -291,15 +312,18 @@ try:
         updateAmplificationFactor(cross_band_clipping)
 
         # select and cycle fixture profiles
-        permutatedProfiles = [FixtureProfile() for _ in range(FIXTURE_AMOUNT)]
+        '''permutatedProfiles = [FixtureProfile() for _ in range(FIXTURE_AMOUNT)]
         permutation_code = generate_permutation_code()
-        permuted_profiles = permutate_profiles(permutation_code, permutatedProfiles)
+        permuted_profiles = permutate_profiles(permutation_code, permutatedProfiles)'''
 
         for fixtureID in range(0, FIXTURE_AMOUNT):
-            setFixtureColor(fixtures[fixtureID], band_amplitudes, permutatedProfiles[fixtureID].getHexColor())
-            setFixtureBrightness(fixtures[fixtureID], band_amplitudes, permutatedProfiles[fixtureID].getHexFrequency())
+            setFixtureColor(fixtures[fixtureID], band_amplitudes, rgb_color_set[fixtureID].getHexColor())
+            setFixtureBrightness(fixtures[fixtureID], band_amplitudes, rgb_color_set[fixtureID].getHexFrequency())
             setFixtureWhite(fixtures[fixtureID], fixtureID)
 
+            fixtures[fixtureID].display()
+
+        time.sleep(0.05)
         ax.clear()
         ax.bar(band_names, band_amplitudes, color="skyblue")
         ax.set(xlabel="Frequency Band", ylabel="Amplitude")

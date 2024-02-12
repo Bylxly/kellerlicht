@@ -2,7 +2,7 @@ import serial
 import time
 
 # Ersetzen Sie 'COMx' oder '/dev/ttyACM0' mit dem korrekten Port Ihres Arduino
-ser = serial.Serial('COM5', 9600, timeout=1)  # timeout=1s für das Lesen der Daten
+ser = serial.Serial('/dev/tty.usbserial-A50285BI', 57600, timeout=1)  # timeout=1s für das Lesen der Daten
 
 
 def send_dmx_command(channel, value):
@@ -11,16 +11,12 @@ def send_dmx_command(channel, value):
     :param channel: DMX-Kanal (1-512)
     :param value: Wert für den Kanal (0-255)
     """
-    command = f'{channel}:{value}\n'.encode()
-    ser.write(command)
+    command = f"{channel},{value}\n"
+    print(command)
+    ser.write(command.encode())
     print(f"DMX Befehl gesendet: Kanal {channel}, Wert {value}")
 
-    # Warten auf Antwort vom Arduino
-    response = ser.readline().decode().strip()  # Lese die Antwort und entferne Whitespaces/Newline
-    if response:
-        print(f"Antwort vom Arduino: {response}")
-    else:
-        print("Keine Antwort vom Arduino erhalten.")
+
 
 
 print("Drücken Sie Enter, um einen DMX-Befehl zu senden. Zum Beenden 'exit' eingeben.")
